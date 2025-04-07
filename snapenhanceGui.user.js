@@ -2,16 +2,18 @@
 // @name         SnapEnhance Web with GUI
 // @namespace    snapenhance-web-gui
 // @description  A userscript to Enhance the User experience on Snapchat Web
-// @version      1.2.2
+// @version      1.2.3
 // @author       appelmoesGG,SnapEnhance
-// @source       https://github.com/SnapEnhance/web/
-// @license      GPL-3.0-only
-// @supportURL   https://github.com/SnapEnhance/web/issues
 // @match        *://*.snapchat.com/web/*
+// @source       https://github.com/appelmoesgg/snapenhance-web-gui
+// @supportURL   https://github.com/appelmoesgg/snapenhance-web-gui/issues
+// @downloadUrl  https://raw.githubusercontent.com/appelmoesgg/snapenhance-web-gui/master/snapenhanceGui.user.js
+// @updateUrl    https://raw.githubusercontent.com/appelmoesgg/snapenhance-web-gui/master/snapenhanceGui.user.js
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=snapchat.com
+// @require      https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js
+// @license      GPL-3.0-only
 // @grant        unsafeWindow
 // @run-at       document-start
-// @require      https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js
 // ==/UserScript==
 
 /*
@@ -22,28 +24,30 @@ CURRENT KNOWN BUGS:
 - No typing indication is not working when "Hide Bitmoji" is off
 */
 
-const SEversion = "1.2.2"
-let snapEnhanceSettings = null
+const SEversion = "1.2.3";
+let snapEnhanceSettings = null;
+let haveRemovedBluePopup = false;
 
 if (!"SEversion" in localStorage){ // Save current version so we can add settings in future versions of SE (if that makes sense)
-    localStorage.setItem("SEversion", SEversion)
+    localStorage.setItem("SEversion", SEversion);
 }
 
 if (localStorage.getItem("SEversion") != SEversion){
-    localStorage.setItem("SEversion", SEversion)
+    localStorage.setItem("SEversion", SEversion);
 }
 
-const bc = new BroadcastChannel("settingsBroadcast")
+const bc = new BroadcastChannel("settingsBroadcast");
 
 bc.onmessage = (ev) => {
     console.log("%cSending the current settings to the Snapchat service worker! \nIf you see this message multiple times, please contact a dev", "color: #FF6F61");
     bc.postMessage(JSON.stringify(snapEnhanceSettings));
 }
 
-const baseSnapEnhanceSettings = {"Anti Unfocus Blur": false, 
-    "Disable Read Receipts": false, 
-    "Hide Bitmoji": false, 
-    "No Typing Indication": false
+const baseSnapEnhanceSettings = {"Anti Unfocus Blur": false,
+    "Disable Read Receipts": false,
+    "Hide Bitmoji": false,
+    "No Typing Indication": false,
+    "No Distraction": false
 };
 
 function checkForNewSettings(){
@@ -84,6 +88,11 @@ function loadSettings(){
 
 // Thanks https://stackoverflow.com/a/61511955
 function waitForElm(selector) {
+    if (selector.includes("wHvEy") && haveRemovedBluePopup){
+        console.log("waitForElemBypass")
+        return new Promise((resolve) => {resolve("alreadyremoved")})
+    }
+
     return new Promise(resolve => {
         if (document.querySelector(selector)) {
             return resolve(document.querySelector(selector));
@@ -109,6 +118,7 @@ var observer = new MutationObserver(function() {
         if (oldHref != document.location.href) {
             oldHref = document.location.href;
             injectGui();
+            antiDistraction();
         }
 });
 observer.observe(document.body, {childList: true,subtree: true});
@@ -116,12 +126,32 @@ observer.observe(document.body, {childList: true,subtree: true});
 
 //wait for the top bar to load then inject the GUI
 function injectGui(){
-	waitForElm('.k1IaM').then((elm) => {
+    waitForElm('.k1IaM').then((elm) => {
     console.log('%c(Re)injecting gui...', "color:rgb(9, 255, 0)");
     elm.append(gui.domElement);
    });
 }
 
+
+function antiDistraction(){
+    waitForElm("#root > div.Fpg8t > div.BL7do > div.wHvEy").then((elm) => {
+        waitForElm("#root > div.Fpg8t > div.Vbjsg.WJjwl > div > div > div > div.k1IaM > div.kxqcc > button").then((elm) => {
+            if (snapEnhanceSettings["No Distraction"] == true){
+                if (!haveRemovedBluePopup){
+                    document.getElementsByClassName("wHvEy")[0].remove();
+                    haveRemovedBluePopup = true;
+                }
+
+                document.getElementsByClassName("WGPER")[0].disabled = true;
+                document.getElementsByClassName("WGPER")[0].title = "No Distraction!!!";
+
+            } else {
+                document.getElementsByClassName("WGPER")[0].disabled = false;
+                document.getElementsByClassName("WGPER")[0].title = "Spotlight"
+            }
+        })
+    })
+}
 
 (function (window) {
     console.log(`%cWelcome to SnapEnhance Web v${localStorage.getItem("SEversion")}!`, "font-size: 2em; background-color: black; font-style: bold;")
@@ -167,13 +197,12 @@ function injectGui(){
         }
         async function hookPostRequest(request, response) {
             if (request.headers && request.headers.get("content-type") === "application/grpc-web+proto") {
-                console.log("GRPC SHIT:", request.url)
                 const arrayBuffer = await response.arrayBuffer();
                 response.arrayBuffer = async () => arrayBuffer;
             }
 
             return response
-            
+
         }
 
         // Hook websocket (hide bitmoji)
@@ -253,8 +282,9 @@ function injectGui(){
         if (args[0] === "audio" || args[0] === "video" || args[0] === "img") {
             simpleHook(result, "setAttribute", (proxy2, instance2) => (...args2) => {
                 result.style = "pointer-events: auto;";
-                if (args2[0] === "controlsList")
+                if (args2[0] === "controlsList"){
                     return;
+                }
                 proxy2.call(instance2, ...args2);
             });
             result.addEventListener("load", (_) => {
@@ -271,45 +301,48 @@ function injectGui(){
     // Always focused - Fixed now 24/3/25 17:44
     const oldFocus = document.hasFocus();
     document.hasFocus = () => {
-	    if (snapEnhanceSettings["Anti Unfocus Blur"]){
-	        return true;
-	    } else {
-		return oldFocus;
-	    }
+        if (snapEnhanceSettings["Anti Unfocus Blur"]){
+            return true;
+        } else {
+        return oldFocus;
+        }
     }
 
-	
+
     const oldAddEventListener = EventTarget.prototype.addEventListener;
     Object.defineProperty(EventTarget.prototype, "addEventListener", {
         value: function (...args) {
             const eventName = args[0];
-		
+
             if (eventName === "keydown"){
                 return;
-	    }
-		
+        }
+
             if (eventName === "focus" && snapEnhanceSettings["Anti Unfocus Blur"]){
                 return;
-	    }
-		
+        }
+
             return oldAddEventListener.call(this, ...args);
         }
     });
 }(window.unsafeWindow || window));
 
-const gui = new dat.GUI({name: "SnapEnhance WEB",autoPlace: false, closeOnTop: true})
+const gui = new dat.GUI({name: "SnapEnhance WEB", autoPlace: false, closeOnTop: true})
 gui.width = 300;
 gui.domElement.style.zIndex = 100;
 gui.domElement.style.marginTop = "auto"
 
 loadSettings();
 
-for ([setting,value] of Object.entries(snapEnhanceSettings)){
-	gui.add(snapEnhanceSettings, setting).onChange((val) => {
+for (let [setting,value] of Object.entries(snapEnhanceSettings)){
+    gui.add(snapEnhanceSettings, setting).onChange((val) => {
+            antiDistraction();
             localStorage.setItem("snapEnhanceSettings", JSON.stringify(snapEnhanceSettings));
             bc.postMessage(JSON.stringify(snapEnhanceSettings));
         }
     );
 }
 
+
+antiDistraction()
 injectGui();
